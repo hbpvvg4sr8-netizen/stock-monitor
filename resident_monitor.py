@@ -12,6 +12,7 @@
     python resident_monitor.py --once --dry-run
 
 规则配置：alert_rules.json；冷却状态：monitor_state.json。
+Vision 配置：VISION_ENABLED、VISION_MODEL、VISION_OUTPUT_DIR。
 """
 
 from __future__ import annotations
@@ -284,7 +285,39 @@ def build_signals(quote: dict[str, Any], rules: dict[str, Any]) -> list[str]:
     return signals
 
 
-def format_alert(quote: dict[str, Any], signals: list[str]) -> str:
+def vision_commentary(quote: dict[str, Any]) -> str | None:
+    """为新预警生成一次技术图，并调用 Vision；失败时不阻塞原有报警。"""
+    enabled = os.getenv("VISION_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
+    if not enabled:
+        return None
+    if not os.getenv("OPENAI_API_KEY"):
+        print("Vision 已跳过：未设置 OPENAI_API_KEY", file=sys.stderr)
+        return None
+
+    try:
+        from openai_vision_demo import analyze_chart, create_chart, fetch_history
+
+        output_dir = Path(os.getenv("VISION_OUTPUT_DIR", "runtime/vision"))
+        chart_path = output_dir / f"{quote['code']}_{now().strftime('%Y%m%d_%H%M%S')}.png"
+        frame = fetch_history(quote["code"])
+        create_chart(frame, quote["code"], quote.get("name") or quote.get("requested_name", ""), chart_path)
+        model = os.getenv("VISION_MODEL", "gpt-6-luna")
+        commentary = analyze_chart(
+            chart_path,
+            quote["code"],
+            quote.get("name") or quote.get("requested_name", ""),
+            model,
+        )
+        print(f"Vision 分析完成: {quote['code']}，图表保存于 {chart_path}")
+        return commentary[:3000]
+    except Exception as exc:  # noqa: BLE001 - AI 失败不阻塞行情报警
+        print(f"Vision 分析失败 [{quote['code']}]: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return None
+
+
+def format_alert(
+    quote: dict[str, Any], signals: list[str], vision: str | None = None
+) -> str:
     metrics = quote.get("technical", {})
     extra = []
     if quote.get("turnover_rate") is not None:
@@ -294,7 +327,7 @@ def format_alert(quote: dict[str, Any], signals: list[str]) -> str:
     for period, intraday in quote.get("intraday", {}).items():
         if intraday.get("volume_surge_ratio") is not None:
             extra.append(f"{period}线量能：{intraday['volume_surge_ratio']:.2f} 倍")
-    return (
+    message = (
         f"A股监控预警｜{quote.get('name') or quote.get('requested_name')} ({quote['code']})\n"
         f"最新价：{quote['price']:.2f}\n"
         f"当日收益率：{quote.get('daily_return_pct'):.2f}%\n"
@@ -302,6 +335,9 @@ def format_alert(quote: dict[str, Any], signals: list[str]) -> str:
         + ("；".join(extra) + "\n" if extra else "")
         + f"数据源：{quote.get('source')}｜行情时间：{quote.get('quote_time') or '未知'}"
     )
+    if vision:
+        message += f"\n\nVision 技术图分析（辅助参考）：\n{vision}"
+    return message
 
 
 def run_once(
@@ -345,7 +381,8 @@ def run_once(
             continue
 
         alert_count += 1
-        if send_notification(format_alert(quote, signals), dry_run=dry_run):
+        vision = vision_commentary(quote)
+        if send_notification(format_alert(quote, signals, vision), dry_run=dry_run):
             state[code] = {
                 "last_sent_at": current.isoformat(timespec="seconds"),
                 "last_return_pct": quote.get("daily_return_pct"),
