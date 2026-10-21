@@ -31,4 +31,4 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
 
       - name: Run multi-source quote test
-        run: python multi_source_test.py --code 000651 --name 格力电器
+        run: python multi_source_test.py --watchlist watchlist.json
