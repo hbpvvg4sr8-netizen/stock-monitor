@@ -353,6 +353,14 @@ def run_once(
             }
 
     save_state(state_path, state)
+    for quote in result["quotes"]:
+        signal_text = "；".join(quote.get("signals", [])) or "无触发信号"
+        daily_return = quote.get("daily_return_pct")
+        daily_text = f"{daily_return:.2f}%" if daily_return is not None else "未知"
+        print(
+            f"行情 {quote.get('name') or quote.get('requested_name')}({quote['code']}) "
+            f"价格={quote['price']:.2f} 当日涨跌={daily_text} 信号={signal_text}"
+        )
     result["summary"]["alert_count"] = alert_count
     result["summary"]["rules"] = rules
     print(json.dumps(result["summary"], ensure_ascii=False))
