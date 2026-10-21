@@ -1,0 +1,8 @@
+{
+  "daily_return_threshold_pct": -3.0,
+  "volume_surge_ratio": 2.0,
+  "turnover_rate_threshold_pct": 5.0,
+  "breakout_buffer_pct": 0.5,
+  "breakout_volume_ratio": 1.5,
+  "technical_lookback_days": 20
+}

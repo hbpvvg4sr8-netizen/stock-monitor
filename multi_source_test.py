@@ -52,7 +52,10 @@ def validate_quote(quote: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"无效最新价: {quote.get('price')!r}")
 
     quote["price"] = price
-    for key in ("prev_close", "change", "change_pct", "open", "high", "low", "volume", "amount"):
+    for key in (
+        "prev_close", "change", "change_pct", "open", "high", "low", "volume",
+        "amount", "turnover_rate", "volume_ratio",
+    ):
         quote[key] = to_float(quote.get(key))
 
     if quote["prev_close"] and quote["prev_close"] > 0:
@@ -118,6 +121,8 @@ def fetch_akshare_batch(codes: list[str]) -> dict[str, dict[str, Any]]:
                 "low": row.get("最低"),
                 "volume": row.get("成交量"),
                 "amount": row.get("成交额"),
+                "turnover_rate": row.get("换手率"),
+                "volume_ratio": row.get("量比"),
                 "quote_time": row.get("时间戳"),
             })
         except ValueError:
