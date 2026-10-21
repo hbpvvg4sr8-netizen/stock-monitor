@@ -4,5 +4,9 @@
   "turnover_rate_threshold_pct": 5.0,
   "breakout_buffer_pct": 0.5,
   "breakout_volume_ratio": 1.5,
-  "technical_lookback_days": 20
+  "technical_lookback_days": 20,
+  "intraday_periods": [30, 60],
+  "intraday_lookback_bars": 20,
+  "intraday_breakout_buffer_pct": 0.2,
+  "intraday_breakout_volume_ratio": 1.5
 }

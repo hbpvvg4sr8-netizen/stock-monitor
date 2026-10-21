@@ -43,6 +43,10 @@ DEFAULT_RULES = {
     "breakout_buffer_pct": 0.5,
     "breakout_volume_ratio": 1.5,
     "technical_lookback_days": 20,
+    "intraday_periods": [30, 60],
+    "intraday_lookback_bars": 20,
+    "intraday_breakout_buffer_pct": 0.2,
+    "intraday_breakout_volume_ratio": 1.5,
 }
 
 
@@ -200,6 +204,55 @@ def technical_metrics(quote: dict[str, Any], rules: dict[str, Any]) -> dict[str,
         return {"technical_error": f"{type(exc).__name__}: {exc}"}
 
 
+def intraday_breakout_metrics(quote: dict[str, Any], rules: dict[str, Any]) -> dict[str, Any]:
+    """检查 30/60 分钟线向上突破，并要求当前量能高于该周期均量。"""
+    result: dict[str, Any] = {}
+    try:
+        import akshare as ak
+        import pandas as pd
+
+        lookback = int(rules["intraday_lookback_bars"])
+        buffer_pct = float(rules["intraday_breakout_buffer_pct"])
+        volume_threshold = float(rules["intraday_breakout_volume_ratio"])
+        cutoff = now().replace(tzinfo=None)
+        for period in rules.get("intraday_periods", [30, 60]):
+            key = f"{int(period)}m"
+            bars = ak.stock_zh_a_hist_min_em(
+                symbol=quote["code"], period=str(period), adjust=""
+            )
+            required = {"时间", "收盘", "最高", "成交量"}
+            if not required.issubset(bars.columns):
+                result[key] = {"error": "分钟线缺少必要字段"}
+                continue
+            bars = bars.copy()
+            bars["_time"] = pd.to_datetime(bars["时间"], errors="coerce")
+            bars = bars[bars["_time"] <= cutoff].dropna(subset=list(required))
+            if len(bars) < lookback + 1:
+                result[key] = {"error": "分钟线数量不足"}
+                continue
+            bars = bars.tail(lookback + 1)
+            previous = bars.iloc[:-1].tail(lookback)
+            latest = bars.iloc[-1]
+            average_volume = float(previous["成交量"].astype(float).mean())
+            latest_volume = float(latest["成交量"])
+            volume_surge = latest_volume / average_volume if average_volume > 0 else None
+            prior_high = float(previous["最高"].astype(float).max())
+            price = float(quote["price"])
+            result[key] = {
+                "bar_time": str(latest["时间"]),
+                "prior_high": prior_high,
+                "volume_surge_ratio": volume_surge,
+                "breakout_up": bool(
+                    price >= prior_high * (1 + buffer_pct / 100)
+                    and volume_surge is not None
+                    and volume_surge >= volume_threshold
+                ),
+            }
+    except Exception as exc:  # noqa: BLE001 - 分钟线失败不影响日线和价格监控
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    return result
+
+
 def build_signals(quote: dict[str, Any], rules: dict[str, Any]) -> list[str]:
     signals: list[str] = []
     daily_return = quote.get("daily_return_pct")
@@ -221,6 +274,13 @@ def build_signals(quote: dict[str, Any], rules: dict[str, Any]) -> list[str]:
         signals.append(f"向上突破近{rules['technical_lookback_days']}日高点")
     if metrics.get("breakdown_down"):
         signals.append(f"向下跌破近{rules['technical_lookback_days']}日低点")
+
+    for period in rules.get("intraday_periods", [30, 60]):
+        intraday = quote.get("intraday", {}).get(f"{int(period)}m", {})
+        if intraday.get("breakout_up"):
+            ratio = intraday.get("volume_surge_ratio")
+            ratio_text = f"，量能约{ratio:.2f}倍" if ratio is not None else ""
+            signals.append(f"{period}分钟线向上突破放量{ratio_text}")
     return signals
 
 
@@ -231,6 +291,9 @@ def format_alert(quote: dict[str, Any], signals: list[str]) -> str:
         extra.append(f"换手率：{quote['turnover_rate']:.2f}%")
     if metrics.get("volume_surge_ratio") is not None:
         extra.append(f"量能/近期均值：{metrics['volume_surge_ratio']:.2f} 倍")
+    for period, intraday in quote.get("intraday", {}).items():
+        if intraday.get("volume_surge_ratio") is not None:
+            extra.append(f"{period}线量能：{intraday['volume_surge_ratio']:.2f} 倍")
     return (
         f"A股监控预警｜{quote.get('name') or quote.get('requested_name')} ({quote['code']})\n"
         f"最新价：{quote['price']:.2f}\n"
@@ -260,6 +323,7 @@ def run_once(
 
     for quote in result["quotes"]:
         quote["technical"] = technical_metrics(quote, rules)
+        quote["intraday"] = intraday_breakout_metrics(quote, rules)
         signals = build_signals(quote, rules)
         quote["signals"] = signals
         code = quote["code"]
