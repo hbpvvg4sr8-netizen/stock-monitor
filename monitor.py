@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 STOCKS = {
+    "格力电器": ("000651", "0.000651"),
     "沪硅产业": ("688126", "1.688126"),
     "觅睿科技": ("920036", "0.920036"),
 }
@@ -73,5 +74,4 @@ print("失败项目数:", failures)
 
 if failures:
     raise SystemExit(1)
-
 
